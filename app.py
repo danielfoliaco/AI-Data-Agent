@@ -3,55 +3,71 @@ import os
 import pandas as pd
 from google import genai
 
-# 1. Setup and Connect
+# Setup and Connect
 api_key = os.environ.get("GEMINI_API_KEY")
-st.set_page_config(page_title="AI Data Agent", layout="wide")
+st.set_page_config(page_title="AI Data Agent", layout="wide", initial_sidebar_state="expanded")
+
+# Quick Dark Mode Toggle (Phase 2 Preview)
+dark_mode = st.sidebar.toggle("🌙 Dark Mode")
+if dark_mode:
+    st.markdown("""<style>
+        .stApp { background-color: #0E1117; color: #FAFAFA; }
+        </style>""", unsafe_allow_html=True)
+
 st.title("🤖 Super Agent: Data Command Center")
 
 if not api_key:
     st.error("⚠️ API Key not configured!")
     st.stop()
 
-# Initialize the Gemini Client
 client = genai.Client(api_key=api_key)
-st.success("✅ Cloud Station Connected to Gemini API!")
 
-# 2. File Intake
+# 1. Data Intake
 st.header("1. Data Intake")
-uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx", "txt"])
 
 if uploaded_file is not None:
-    # 3. Read and Display the Data
     try:
-        if uploaded_file.name.endswith('.csv'):
+        if uploaded_file.name.endswith('.csv') or uploaded_file.name.endswith('.txt'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
             
-        st.info(f"File loaded successfully! The dataset has {df.shape[0]} rows and {df.shape[1]} columns.")
-        
-        # Show a preview of the data
-        st.write("### Data Preview")
+        st.success(f"File loaded successfully! {df.shape[0]} rows and {df.shape[1]} columns.")
         st.dataframe(df.head(5))
         
-        # 4. The Super Agent Chat
-        st.header("2. Talk to the Super Agent")
-        user_prompt = st.text_area("What would you like me to do with this data? (e.g., 'What are the key trends?' or 'Are there any missing values?')")
+        # Phase 1: Reporting Engine
+        st.header("2. Reporting & Analysis")
+        col1, col2 = st.columns(2)
         
-        if st.button("Run Analysis"):
-            with st.spinner("The Super Agent is analyzing your data..."):
-                # We send a sample of the data + the user's question to the AI
-                data_sample = df.head(10).to_csv(index=False)
-                ai_prompt = f"Here is a sample of the user's dataset:\n{data_sample}\n\nThe user asks: {user_prompt}\n\nAct as an expert data analyst and provide a clear, professional answer."
-                
-                # Ask Gemini
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=ai_prompt,
-                )
-                
-                st.write("### Super Agent Response")
-                st.write(response.text)
+        with col1:
+            st.subheader("Interactive Chat")
+            user_prompt = st.text_area("Ask a specific question about the data:")
+            if st.button("Ask Agent"):
+                with st.spinner("Analyzing..."):
+                    data_sample = df.head(15).to_csv(index=False)
+                    ai_prompt = f"Data Sample:\n{data_sample}\n\nQuestion: {user_prompt}\nProvide a professional answer."
+                    response = client.models.generate_content(model='gemini-2.5-flash', contents=ai_prompt)
+                    st.info(response.text)
+                    
+        with col2:
+            st.subheader("Extensive Reports")
+            if st.button("Generate Executive Report"):
+                with st.spinner("Drafting comprehensive report..."):
+                    data_sample = df.head(25).to_csv(index=False)
+                    columns_list = ", ".join(df.columns.tolist())
+                    ai_prompt = f"Data Columns: {columns_list}\nData Sample:\n{data_sample}\n\nAct as a Senior Statistician. Generate a comprehensive, multi-paragraph markdown report analyzing this dataset. Include potential risks, key metrics to watch, and strategic recommendations."
+                    report = client.models.generate_content(model='gemini-2.5-flash', contents=ai_prompt)
+                    st.markdown("### Executive Summary")
+                    st.markdown(report.text)
+                    
+                    # Add download button for the report
+                    st.download_button(
+                        label="Download Report as .txt",
+                        data=report.text,
+                        file_name="Executive_Report.txt",
+                        mime="text/plain"
+                    )
                 
     except Exception as e:
         st.error(f"Error reading file: {e}")
