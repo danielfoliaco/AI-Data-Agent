@@ -1,5 +1,7 @@
 streamlit
 pandas
-google-genai
-openpyxl
 plotly
+openpyxl
+google-genai
+openai
+anthropic
