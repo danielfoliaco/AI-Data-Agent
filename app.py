@@ -3,33 +3,77 @@ import os
 import pandas as pd
 import plotly.express as px
 from google import genai
+import openai
+import anthropic
 
-# Setup and Connect
-api_key = os.environ.get("GEMINI_API_KEY")
+# --- APP SETUP ---
 st.set_page_config(page_title="AI Data Agent", layout="wide", initial_sidebar_state="expanded")
 
-# Dark Mode Toggle
+# --- SIDEBAR & AI SELECTION ---
+st.sidebar.title("⚙️ Agent Settings")
 dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=True)
+
 if dark_mode:
-    st.markdown("""<style>
-        .stApp { background-color: #0E1117; color: #FAFAFA; }
-        </style>""", unsafe_allow_html=True)
+    st.markdown("""<style>.stApp { background-color: #0E1117; color: #FAFAFA; }</style>""", unsafe_allow_html=True)
+
+# The Dropdown for AI Selection
+ai_choice = st.sidebar.selectbox(
+    "Select AI Engine", 
+    ["Google Gemini (Free 1500/day)", "DeepSeek (Free 5M Trial)", "OpenAI ChatGPT ($5 Trial)", "Anthropic Claude ($5 Trial)", "xAI Grok (Promo)"]
+)
+
+# Load Keys from Streamlit Secrets / Environment
+gemini_key = os.environ.get("GEMINI_API_KEY")
+openai_key = os.environ.get("OPENAI_API_KEY")
+anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
+grok_key = os.environ.get("GROK_API_KEY")
+
+# Unified AI Routing Function
+def get_ai_response(prompt, choice):
+    try:
+        if choice == "Google Gemini (Free 1500/day)":
+            if not gemini_key: return "⚠️ GEMINI_API_KEY is missing in Streamlit Secrets."
+            client = genai.Client(api_key=gemini_key)
+            response = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
+            return response.text
+            
+        elif choice == "OpenAI ChatGPT ($5 Trial)":
+            if not openai_key: return "⚠️ OPENAI_API_KEY is missing in Streamlit Secrets."
+            client = openai.OpenAI(api_key=openai_key)
+            response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}])
+            return response.choices[0].message.content
+            
+        elif choice == "Anthropic Claude ($5 Trial)":
+            if not anthropic_key: return "⚠️ ANTHROPIC_API_KEY is missing in Streamlit Secrets."
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            response = client.messages.create(model="claude-3-5-haiku-latest", max_tokens=1500, messages=[{"role": "user", "content": prompt}])
+            return response.content[0].text
+            
+        elif choice == "DeepSeek (Free 5M Trial)":
+            if not deepseek_key: return "⚠️ DEEPSEEK_API_KEY is missing in Streamlit Secrets."
+            # DeepSeek uses the OpenAI library architecture
+            client = openai.OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com/v1")
+            response = client.chat.completions.create(model="deepseek-chat", messages=[{"role": "user", "content": prompt}])
+            return response.choices[0].message.content
+            
+        elif choice == "xAI Grok (Promo)":
+            if not grok_key: return "⚠️ GROK_API_KEY is missing in Streamlit Secrets."
+            client = openai.OpenAI(api_key=grok_key, base_url="https://api.x.ai/v1")
+            response = client.chat.completions.create(model="grok-beta", messages=[{"role": "user", "content": prompt}])
+            return response.choices[0].message.content
+            
+    except Exception as e:
+        return f"API Error: {e}"
 
 st.title("🤖 Super Agent: Data Command Center")
 
-if not api_key:
-    st.error("⚠️ API Key not configured!")
-    st.stop()
-
-client = genai.Client(api_key=api_key)
-
-# 1. Data Intake
+# --- MAIN APP LOGIC ---
 st.header("1. Data Intake & Automated Cleaning")
-uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx", "txt"])
+uploaded_file = st.file_uploader("Upload an Excel, CSV, or TXT file", type=["csv", "xlsx", "txt"])
 
 if uploaded_file is not None:
     try:
-        # Read the file
         if uploaded_file.name.endswith('.csv') or uploaded_file.name.endswith('.txt'):
             df = pd.read_csv(uploaded_file)
         else:
@@ -40,42 +84,35 @@ if uploaded_file is not None:
         with st.expander("Preview Raw Data"):
             st.dataframe(df.head())
             
-        # The Cleaning Agent
         if st.button("✨ Run Automated Cleaning & Normalization"):
-            with st.spinner("Agent is normalizing data and mapping auxiliary columns..."):
-                # In a full deployment, the AI writes cleaning code here. 
-                # For now, we simulate the automated cleanup of empty rows and standardizing headers.
+            with st.spinner("Normalizing data..."):
                 df.dropna(how='all', inplace=True)
                 df.columns = [str(c).strip().replace('\n', ' ').title() for c in df.columns]
                 st.session_state['cleaned_df'] = df
-                st.success("Data normalized! Ready for Power BI export or Dashboarding.")
+                st.success("Data normalized and formatted.")
                 st.dataframe(df.head())
 
-        # Use cleaned data if available
         working_df = st.session_state.get('cleaned_df', df)
-
         st.divider()
 
-        # 2. Generative Dashboards & Reports
+        # Generative Section
         st.header("2. Prompt-Driven Analysis")
-        
-        prompt_type = st.radio("What would you like the Agent to build?", ["Dynamic Dashboard", "Extensive Report"])
+        prompt_type = st.radio("What would you like to build?", ["Dynamic Dashboard", "Extensive Report"])
         user_prompt = st.text_area("Tell the Super Agent exactly what you need:")
         
         if st.button("Generate"):
             if user_prompt:
-                with st.spinner(f"Building your {prompt_type.lower()}..."):
-                    # Give the AI the structure of the data
+                with st.spinner(f"Routing your request to {ai_choice}..."):
                     col_info = ", ".join([f"{col} ({dtype})" for col, dtype in zip(working_df.columns, working_df.dtypes)])
                     data_sample = working_df.head(5).to_csv(index=False)
                     
                     if prompt_type == "Extensive Report":
                         sys_prompt = f"Data columns: {col_info}\nSample:\n{data_sample}\nUser Request: {user_prompt}\nAct as a senior analyst. Provide a deep, strategic report. Add a section called 'Value-Add Recommendations' suggesting insights they didn't ask for."
-                        report = client.models.generate_content(model='gemini-2.5-flash', contents=sys_prompt)
-                        st.markdown(report.text)
+                        
+                        report_text = get_ai_response(sys_prompt, ai_choice)
+                        st.markdown(report_text)
                         
                     elif prompt_type == "Dynamic Dashboard":
-                        # We ask the AI to write Python code for Plotly
                         sys_prompt = f"""
                         You are an expert Python data visualization developer.
                         The user has a pandas DataFrame named 'working_df'.
@@ -87,21 +124,25 @@ if uploaded_file is not None:
                         Assume 'working_df', 'px', and 'st' are already imported.
                         If the user asks for filters, use st.multiselect to filter working_df before plotting.
                         """
-                        code_response = client.models.generate_content(model='gemini-2.5-flash', contents=sys_prompt)
                         
-                        # Execute the AI's generated code safely
-                        ai_code = code_response.text.replace("```python", "").replace("```", "").strip()
-                        try:
-                            # The exec command runs the code the AI just wrote!
-                            exec(ai_code, globals(), {"working_df": working_df, "st": st, "px": px})
-                        except Exception as code_error:
-                            st.warning("The Agent tried to build a complex chart but encountered an error. Try rephrasing your prompt.")
-                            st.code(ai_code) # Show the code so the user sees what went wrong
-
-        # 3. Export Workspace
+                        code_response = get_ai_response(sys_prompt, ai_choice)
+                        
+                        # Execute AI Code
+                        ai_code = code_response.replace("```python", "").replace("```", "").strip()
+                        
+                        if "API Error" in ai_code or "missing in Streamlit Secrets" in ai_code:
+                            st.error(ai_code)
+                        else:
+                            try:
+                                exec(ai_code, globals(), {"working_df": working_df, "st": st, "px": px})
+                            except Exception as code_error:
+                                st.warning("The Agent encountered a syntax error while building this specific chart structure. Please try rephrasing the prompt.")
+                                st.code(ai_code)
+                                
+        # Export Engine
         st.divider()
         st.header("3. Export Workspace")
-        st.write("Export clean, comma-separated files tailored for your operational databases.")
+        st.write("Export pristine, comma-separated files tailored for standard BI schema imports.")
         csv_data = working_df.to_csv(index=False, sep=',')
         st.download_button(
             label="Download Normalized Data (.csv)",
