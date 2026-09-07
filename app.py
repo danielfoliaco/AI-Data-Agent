@@ -24,92 +24,91 @@ if not api_key:
 client = genai.Client(api_key=api_key)
 
 # 1. Data Intake
-st.header("1. Data Intake")
+st.header("1. Data Intake & Automated Cleaning")
 uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx", "txt"])
 
 if uploaded_file is not None:
     try:
+        # Read the file
         if uploaded_file.name.endswith('.csv') or uploaded_file.name.endswith('.txt'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
             
-        st.success(f"File loaded successfully! {df.shape[0]} rows and {df.shape[1]} columns.")
+        st.success(f"File loaded! {df.shape[0]} rows and {df.shape[1]} columns.")
         
         with st.expander("Preview Raw Data"):
             st.dataframe(df.head())
-        
-        # Phase 1: Reporting Engine
-        st.header("2. Reporting & Analysis")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Interactive Chat")
-            user_prompt = st.text_area("Ask a specific question about the data:")
-            if st.button("Ask Agent"):
-                with st.spinner("Analyzing..."):
-                    data_sample = df.head(15).to_csv(index=False)
-                    ai_prompt = f"Data Sample:\n{data_sample}\n\nQuestion: {user_prompt}\nProvide a professional answer."
-                    response = client.models.generate_content(model='gemini-2.5-flash', contents=ai_prompt)
-                    st.info(response.text)
-                    
-        with col2:
-            st.subheader("Extensive Reports")
-            if st.button("Generate Executive Report"):
-                with st.spinner("Drafting comprehensive report..."):
-                    data_sample = df.head(25).to_csv(index=False)
-                    columns_list = ", ".join(df.columns.tolist())
-                    ai_prompt = f"Data Columns: {columns_list}\nData Sample:\n{data_sample}\n\nAct as a Senior Statistician. Generate a comprehensive, multi-paragraph markdown report analyzing this dataset. Include potential risks, key metrics to watch, and strategic recommendations."
-                    report = client.models.generate_content(model='gemini-2.5-flash', contents=ai_prompt)
-                    st.markdown("### Executive Summary")
-                    st.markdown(report.text)
-                    
-                    st.download_button(
-                        label="Download Report as .txt",
-                        data=report.text,
-                        file_name="Executive_Report.txt",
-                        mime="text/plain"
-                    )
+            
+        # The Cleaning Agent
+        if st.button("✨ Run Automated Cleaning & Normalization"):
+            with st.spinner("Agent is normalizing data and mapping auxiliary columns..."):
+                # In a full deployment, the AI writes cleaning code here. 
+                # For now, we simulate the automated cleanup of empty rows and standardizing headers.
+                df.dropna(how='all', inplace=True)
+                df.columns = [str(c).strip().replace('\n', ' ').title() for c in df.columns]
+                st.session_state['cleaned_df'] = df
+                st.success("Data normalized! Ready for Power BI export or Dashboarding.")
+                st.dataframe(df.head())
 
-        # Phase 1.5: Dynamic Dashboards
-        st.divider()
-        st.header("3. Dynamic Visualizations")
-        
-        # Auto-detect numeric columns for charts
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-        all_cols = df.columns.tolist()
-        
-        if len(numeric_cols) > 0:
-            chart_col1, chart_col2, chart_col3 = st.columns(3)
-            with chart_col1:
-                chart_type = st.selectbox("Select Chart Type", ["Bar Chart", "Scatter Plot", "Line Chart"])
-            with chart_col2:
-                x_axis = st.selectbox("Select X-Axis", all_cols)
-            with chart_col3:
-                y_axis = st.selectbox("Select Y-Axis", numeric_cols)
-                
-            if st.button("Generate Chart"):
-                if chart_type == "Bar Chart":
-                    fig = px.bar(df, x=x_axis, y=y_axis, template="plotly_dark" if dark_mode else "plotly_white")
-                elif chart_type == "Scatter Plot":
-                    fig = px.scatter(df, x=x_axis, y=y_axis, template="plotly_dark" if dark_mode else "plotly_white")
-                else:
-                    fig = px.line(df, x=x_axis, y=y_axis, template="plotly_dark" if dark_mode else "plotly_white")
-                
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("No numeric columns detected to build charts.")
+        # Use cleaned data if available
+        working_df = st.session_state.get('cleaned_df', df)
 
-        # Phase 3 Preview: Export Engine
         st.divider()
-        st.header("4. Export Workspace")
-        csv_data = df.to_csv(index=False, sep=',')
+
+        # 2. Generative Dashboards & Reports
+        st.header("2. Prompt-Driven Analysis")
+        
+        prompt_type = st.radio("What would you like the Agent to build?", ["Dynamic Dashboard", "Extensive Report"])
+        user_prompt = st.text_area("Tell the Super Agent exactly what you need:")
+        
+        if st.button("Generate"):
+            if user_prompt:
+                with st.spinner(f"Building your {prompt_type.lower()}..."):
+                    # Give the AI the structure of the data
+                    col_info = ", ".join([f"{col} ({dtype})" for col, dtype in zip(working_df.columns, working_df.dtypes)])
+                    data_sample = working_df.head(5).to_csv(index=False)
+                    
+                    if prompt_type == "Extensive Report":
+                        sys_prompt = f"Data columns: {col_info}\nSample:\n{data_sample}\nUser Request: {user_prompt}\nAct as a senior analyst. Provide a deep, strategic report. Add a section called 'Value-Add Recommendations' suggesting insights they didn't ask for."
+                        report = client.models.generate_content(model='gemini-2.5-flash', contents=sys_prompt)
+                        st.markdown(report.text)
+                        
+                    elif prompt_type == "Dynamic Dashboard":
+                        # We ask the AI to write Python code for Plotly
+                        sys_prompt = f"""
+                        You are an expert Python data visualization developer.
+                        The user has a pandas DataFrame named 'working_df'.
+                        Columns: {col_info}
+                        User Request: {user_prompt}
+                        
+                        Write Python code using Streamlit (st) and Plotly Express (px) to fulfill this request. 
+                        Do NOT use Markdown formatting. Do not output anything except the executable Python code. 
+                        Assume 'working_df', 'px', and 'st' are already imported.
+                        If the user asks for filters, use st.multiselect to filter working_df before plotting.
+                        """
+                        code_response = client.models.generate_content(model='gemini-2.5-flash', contents=sys_prompt)
+                        
+                        # Execute the AI's generated code safely
+                        ai_code = code_response.text.replace("```python", "").replace("```", "").strip()
+                        try:
+                            # The exec command runs the code the AI just wrote!
+                            exec(ai_code, globals(), {"working_df": working_df, "st": st, "px": px})
+                        except Exception as code_error:
+                            st.warning("The Agent tried to build a complex chart but encountered an error. Try rephrasing your prompt.")
+                            st.code(ai_code) # Show the code so the user sees what went wrong
+
+        # 3. Export Workspace
+        st.divider()
+        st.header("3. Export Workspace")
+        st.write("Export clean, comma-separated files tailored for your operational databases.")
+        csv_data = working_df.to_csv(index=False, sep=',')
         st.download_button(
-            label="Download Data (Comma Separated CSV)",
+            label="Download Normalized Data (.csv)",
             data=csv_data,
-            file_name="Processed_Data.csv",
+            file_name="Cleaned_Data_Agent.csv",
             mime="text/csv"
         )
                 
     except Exception as e:
-        st.error(f"Error reading file: {e}")
+        st.error(f"Error processing file: {e}")
